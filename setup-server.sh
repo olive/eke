@@ -38,7 +38,8 @@ deploy ALL=(root) NOPASSWD: /usr/sbin/nginx -t, /usr/bin/systemctl reload nginx
 EOF
 chmod 440 /etc/sudoers.d/deploy-nginx
 
-cat > /etc/nginx/sites-available/site <<EOF
+if [ ! -f /etc/nginx/sites-available/site ]; then
+  cat > /etc/nginx/sites-available/site <<EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -50,6 +51,7 @@ server {
     }
 }
 EOF
+fi
 ln -sf /etc/nginx/sites-available/site /etc/nginx/sites-enabled/site
 rm -f /etc/nginx/sites-enabled/default
 
