@@ -351,6 +351,38 @@ canvas#gameCanvas {
   function lerp(a, b, t) { return a + (b - a) * t; }
   function lerp2(p1, p2, t) { return { x: lerp(p1.x, p2.x, t), y: lerp(p1.y, p2.y, t) }; }
 
+  function drawLibraryBuilding(cx, baseY, now) {
+    const pulse = 0.5 + 0.3 * Math.sin(now / 300);
+    const glowR = Math.max(4, BH * 0.032);
+    bctx.fillStyle = `rgba(255,220,90,${(pulse * 0.5).toFixed(2)})`;
+    bctx.beginPath();
+    bctx.arc(cx, baseY - glowR * 0.3, glowR, 0, Math.PI * 2);
+    bctx.fill();
+
+    const w = Math.max(6, Math.round(BH * 0.06));
+    const h = Math.max(5, Math.round(BH * 0.05));
+    const roofH = Math.round(h * 0.4);
+    const bodyH = h - roofH;
+    const bodyY = baseY - bodyH;
+    const roofY = bodyY - roofH;
+
+    bctx.fillStyle = '#d8c9a0';
+    bctx.fillRect(Math.round(cx - w / 2), Math.round(bodyY), w, bodyH);
+    bctx.fillStyle = '#a89468';
+    const colCount = 3;
+    for (let i = 0; i < colCount; i++) {
+      const colX = Math.round(cx - w / 2 + (i + 0.5) * (w / colCount));
+      bctx.fillRect(colX, Math.round(bodyY), 1, bodyH);
+    }
+    bctx.fillStyle = '#e8c86a';
+    bctx.beginPath();
+    bctx.moveTo(cx - w / 2 - 1, bodyY);
+    bctx.lineTo(cx, roofY);
+    bctx.lineTo(cx + w / 2 + 1, bodyY);
+    bctx.closePath();
+    bctx.fill();
+  }
+
   function drawMap(now) {
     drawScene(false, now);
 
@@ -368,11 +400,7 @@ canvas#gameCanvas {
     bctx.arc(nodes.start.x, nodes.start.y, Math.max(2, BH * 0.015), 0, Math.PI * 2);
     bctx.fill();
 
-    const pulse = 0.7 + 0.3 * Math.sin(now / 300);
-    bctx.fillStyle = `rgba(255,220,90,${pulse.toFixed(2)})`;
-    bctx.beginPath();
-    bctx.arc(nodes.library.x, nodes.library.y, Math.max(2, BH * 0.018), 0, Math.PI * 2);
-    bctx.fill();
+    drawLibraryBuilding(nodes.library.x, nodes.library.y, now);
 
     drawPlayer();
   }
@@ -627,7 +655,22 @@ canvas#gameCanvas {
     ctx.fillText('PRESS UP TO CLOSE', W / 2, by + bh - bottomReserve * 0.7);
   }
 
-  function drawLibrary() {
+  function drawUpArrowHint(cx, topY, now) {
+    const w = Math.max(3, Math.round(libPlayerW * 0.9));
+    const h = Math.max(2, Math.round(w * 0.8));
+    const bob = Math.sin(now / 200) * 1.5;
+    const y = topY - 2 + bob;
+    const alpha = 0.6 + 0.4 * Math.sin(now / 250);
+    bctx.fillStyle = `rgba(255,220,90,${alpha.toFixed(2)})`;
+    bctx.beginPath();
+    bctx.moveTo(cx, y - h);
+    bctx.lineTo(cx - w / 2, y);
+    bctx.lineTo(cx + w / 2, y);
+    bctx.closePath();
+    bctx.fill();
+  }
+
+  function drawLibrary(now) {
     bctx.fillStyle = '#161008';
     bctx.fillRect(0, 0, BW, BH);
 
@@ -675,7 +718,12 @@ canvas#gameCanvas {
       bctx.fillRect(0, sy - 2, innerLeft, 2);
     }
 
-    drawLibPlayer(libPlayer.x, Math.round(libPlayer.y - camTop));
+    const playerScreenFeetY = Math.round(libPlayer.y - camTop);
+    drawLibPlayer(libPlayer.x, playerScreenFeetY);
+
+    if (!libReading && libPlayer.onGround && libNearWall()) {
+      drawUpArrowHint(libPlayer.x, playerScreenFeetY - libPlayerH, now);
+    }
   }
 
   // ---------------- main loop / resize ----------------
@@ -759,7 +807,7 @@ canvas#gameCanvas {
     if (screen === 'title') drawTitle(now);
     else if (screen === 'options') drawOptions();
     else if (screen === 'map') drawMap(now);
-    else if (screen === 'library') drawLibrary();
+    else if (screen === 'library') drawLibrary(now);
 
     ctx.clearRect(0, 0, W, H);
     ctx.drawImage(buf, 0, 0, BW, BH, 0, 0, W, H);
