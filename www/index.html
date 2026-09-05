@@ -9,6 +9,7 @@ body { background: var(--bg); }
 .canvasWrap {
   height: 100vh;
   box-sizing: border-box;
+  position: relative;
 }
 
 canvas#sandCanvas {
@@ -18,9 +19,33 @@ canvas#sandCanvas {
   touch-action: none;
   user-select: none;
 }
+
+.clickPrompt {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: clamp(14px, 4vh, 32px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.4s ease;
+}
+.clickPrompt.hidden {
+  opacity: 0;
+}
 </style>
 <div class="canvasWrap" id="canvasWrap">
   <canvas id="sandCanvas"></canvas>
+  <div class="clickPrompt" id="clickPrompt">click on the screen</div>
 </div>
 <script>
 (function () {
@@ -39,6 +64,7 @@ canvas#sandCanvas {
   const canvas = document.getElementById('sandCanvas');
   const ctx = canvas.getContext('2d', { alpha: false });
   const canvasWrap = document.getElementById('canvasWrap');
+  const clickPrompt = document.getElementById('clickPrompt');
 
   const maskCanvas = document.createElement('canvas');
   const mctx = maskCanvas.getContext('2d');
@@ -167,6 +193,7 @@ canvas#sandCanvas {
     spawnTime[i] = performance.now();
     const [rr, gg, bb] = randomSandColor();
     colR[i] = rr; colG[i] = gg; colB[i] = bb;
+    clickPrompt.classList.add('hidden');
     return true;
   }
 
