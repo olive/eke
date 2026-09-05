@@ -398,6 +398,7 @@ canvas#gameCanvas {
     const r = Math.max(4, BH * 0.03);
     if (Math.hypot(bx - n.x, by - n.y) <= r) {
       if (player.atNode === 'library') {
+        enterLibrary();
         screen = 'library';
       } else {
         player.walking = true;
@@ -408,42 +409,258 @@ canvas#gameCanvas {
     }
   }
 
-  // ---------------- library screen ----------------
-  let libraryBack = null;
+  // ---------------- library screen: Metroid-style vertical shaft ----------------
+  let libWallT = 20, libFloorSpacing = 40, libGapW = 20, libDoorBandH = 400;
+  let libPlayerH = 10, libPlayerW = 6;
+  let libPlayer = null, libCameraY = 0, libReading = false, libBookLines = [];
+  const libKeys = { left: false, right: false };
+  const libTouch = { left: false, right: false };
+
+  function hash1(n) {
+    const x = Math.sin(n * 12.9898) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
   function layoutLibrary() {
-    const size = Math.max(5, Math.round(BH * 0.045));
-    bctx.font = `bold ${size}px ${FONT}`;
-    libraryBack = {
-      label: 'BACK TO MAP',
-      cx: BW / 2,
-      cy: BH * 0.9,
-      w: bctx.measureText('BACK TO MAP').width,
-      h: size,
-      fontSize: size,
-    };
+    libWallT = Math.max(6, Math.round(BW * 0.1));
+    libFloorSpacing = Math.max(24, Math.round(BH * 0.22));
+    libGapW = Math.max(14, Math.round((BW - 2 * libWallT) * 0.38));
+    libDoorBandH = BH * 3;
+    libPlayerH = Math.max(6, Math.round(BH * 0.06));
+    libPlayerW = Math.max(4, Math.round(libPlayerH * 0.6));
+  }
+
+  function doorFloorIndexForBand(i) {
+    const floorsPerBand = Math.max(1, Math.round(libDoorBandH / libFloorSpacing));
+    const h = hash1(i * 5.171 + 3.3);
+    const offset = Math.floor(floorsPerBand * 0.2) + Math.floor(h * floorsPerBand * 0.6);
+    return i * floorsPerBand + offset;
+  }
+
+  function isDoorFloor(k) {
+    const i = Math.floor((k * libFloorSpacing) / libDoorBandH);
+    for (let d = -1; d <= 1; d++) {
+      if (doorFloorIndexForBand(i + d) === k) return true;
+    }
+    return false;
+  }
+
+  function floorGap(k) {
+    const innerLeft = libWallT, innerRight = BW - libWallT;
+    const usableW = Math.max(0, innerRight - innerLeft - libGapW);
+    if (k === 0) return { gapX: innerLeft, gapW: libGapW };
+    if (isDoorFloor(k)) return { gapX: innerRight - libGapW, gapW: libGapW };
+    const h = hash1(k * 12.9898);
+    return { gapX: innerLeft + h * usableW, gapW: libGapW };
+  }
+
+  function inGap(k, x) {
+    const { gapX, gapW } = floorGap(k);
+    return x >= gapX && x <= gapX + gapW;
+  }
+
+  function doorYForBand(i) {
+    return doorFloorIndexForBand(i) * libFloorSpacing;
+  }
+
+  function nearestDoorY(worldY) {
+    const i = Math.floor(worldY / libDoorBandH);
+    let best = null, bestDist = Infinity;
+    for (let d = -1; d <= 1; d++) {
+      const y = doorYForBand(i + d);
+      const dist = Math.abs(y - worldY);
+      if (dist < bestDist) { bestDist = dist; best = y; }
+    }
+    return best;
+  }
+
+  function generateBookText() {
+    const lines = [];
+    for (let i = 0; i < 7; i++) {
+      const wc = 3 + Math.floor(Math.random() * 3);
+      const words = [];
+      for (let w = 0; w < wc; w++) {
+        const len = 2 + Math.floor(Math.random() * 7);
+        let word = '';
+        for (let c = 0; c < len; c++) word += String.fromCharCode(97 + Math.floor(Math.random() * 26));
+        words.push(word);
+      }
+      lines.push(words.join(' '));
+    }
+    return lines;
+  }
+
+  function enterLibrary() {
+    layoutLibrary();
+    libPlayer = { x: BW / 2, y: 0, vx: 0, vy: 0, onGround: true, facing: 1, phase: 0 };
+    libCameraY = 0;
+    libKeys.left = false;
+    libKeys.right = false;
+    libTouch.left = false;
+    libTouch.right = false;
+    libReading = false;
+    libBookLines = [];
+  }
+
+  function libNearWall() {
+    const innerLeft = libWallT, innerRight = BW - libWallT;
+    const halfW = libPlayerW / 2;
+    return (libPlayer.x - halfW <= innerLeft + 3) || (libPlayer.x + halfW >= innerRight - 3);
+  }
+
+  function tryReadBook() {
+    if (libNearWall() && libPlayer.onGround) {
+      libReading = true;
+      libBookLines = generateBookText();
+      return true;
+    }
+    return false;
+  }
+
+  function tryJump() {
+    if (libPlayer.onGround) {
+      libPlayer.vy = -4.4;
+      libPlayer.onGround = false;
+    }
+  }
+
+  function updateLibraryPhysics(now) {
+    if (libReading) return;
+    const innerLeft = libWallT, innerRight = BW - libWallT;
+    const halfW = libPlayerW / 2;
+
+    let vx = 0;
+    if (libKeys.left || libTouch.left) vx -= 1.15;
+    if (libKeys.right || libTouch.right) vx += 1.15;
+    if (vx !== 0) libPlayer.facing = vx > 0 ? 1 : -1;
+    libPlayer.phase = vx !== 0 ? Math.floor(now / 150) % 2 : 0;
+    libPlayer.x = Math.max(innerLeft + halfW, Math.min(innerRight - halfW, libPlayer.x + vx));
+
+    libPlayer.vy = Math.min(libPlayer.vy + 0.35, 5);
+    let newY = libPlayer.y + libPlayer.vy;
+    const dir = Math.sign(libPlayer.vy);
+    if (dir > 0) {
+      const k = Math.floor(newY / libFloorSpacing);
+      const floorY = k * libFloorSpacing;
+      if (floorY > libPlayer.y - 0.01 && floorY <= newY && !inGap(k, libPlayer.x)) {
+        newY = floorY;
+        libPlayer.vy = 0;
+        libPlayer.onGround = true;
+      } else {
+        libPlayer.onGround = false;
+      }
+    } else if (dir < 0) {
+      const k = Math.ceil(newY / libFloorSpacing);
+      const floorY = k * libFloorSpacing;
+      if (floorY < libPlayer.y - 0.01 && floorY >= newY && !inGap(k, libPlayer.x)) {
+        newY = floorY;
+        libPlayer.vy = 0;
+      }
+      libPlayer.onGround = false;
+    }
+    libPlayer.y = newY;
+
+    libCameraY = libPlayer.y - BH * 0.55;
+
+    const doorY = nearestDoorY(libPlayer.y);
+    const nearLeftWall = (libPlayer.x - halfW) <= innerLeft + 2;
+    if (nearLeftWall && Math.abs((libPlayer.y - libPlayerH / 2) - doorY) <= libPlayerH * 0.7) {
+      screen = 'map';
+    }
+  }
+
+  function drawLibPlayer(cx, feetY) {
+    const h = libPlayerH, w = libPlayerW;
+    const x = Math.round(cx - w / 2);
+    const y = feetY - h;
+    bctx.fillStyle = '#f0e8d8';
+    bctx.fillRect(x, y, w, Math.max(1, Math.round(h * 0.35)));
+    bctx.fillStyle = '#c0392b';
+    bctx.fillRect(x, y + Math.round(h * 0.35), w, Math.max(1, Math.round(h * 0.4)));
+    const legOff = !libPlayer.onGround ? 0 : (libPlayer.phase ? 1 : -1);
+    bctx.fillStyle = '#3a3a3a';
+    bctx.fillRect(x + legOff, y + Math.round(h * 0.75), Math.max(1, Math.round(w * 0.4)), Math.round(h * 0.25));
+    bctx.fillRect(x + w - Math.round(w * 0.4) - legOff, y + Math.round(h * 0.75), Math.max(1, Math.round(w * 0.4)), Math.round(h * 0.25));
+  }
+
+  function drawBookOverlay() {
+    const bw = BW * 0.8, bh = BH * 0.7;
+    const bx = (BW - bw) / 2, by = (BH - bh) / 2;
+    bctx.fillStyle = 'rgba(0,0,0,0.6)';
+    bctx.fillRect(0, 0, BW, BH);
+    bctx.fillStyle = '#e8dcc0';
+    bctx.fillRect(bx, by, bw, bh);
+    bctx.strokeStyle = '#5a4a30';
+    bctx.lineWidth = 2;
+    bctx.strokeRect(bx, by, bw, bh);
+
+    bctx.textAlign = 'center';
+    bctx.textBaseline = 'top';
+    const topMargin = bh * 0.1, bottomReserve = bh * 0.16;
+    const contentH = bh - topMargin - bottomReserve;
+    const fontSize = Math.max(4, Math.round(contentH / (libBookLines.length * 1.3)));
+    bctx.font = `bold ${fontSize}px ${FONT}`;
+    bctx.fillStyle = '#2a2015';
+    libBookLines.forEach((line, i) => {
+      bctx.fillText(line.toUpperCase(), BW / 2, by + topMargin + i * fontSize * 1.3);
+    });
+
+    bctx.font = `bold ${Math.max(4, Math.round(fontSize * 0.7))}px ${FONT}`;
+    bctx.fillStyle = '#7a6a4a';
+    bctx.fillText('PRESS UP TO CLOSE', BW / 2, by + bh - bottomReserve * 0.7);
   }
 
   function drawLibrary() {
-    bctx.fillStyle = '#0c0a08';
+    bctx.fillStyle = '#161008';
     bctx.fillRect(0, 0, BW, BH);
-    bctx.textAlign = 'center';
-    bctx.textBaseline = 'middle';
-    const titleSize = fitFontSize(['LIBRARY'], BW * 0.8, BH * 0.2, 1, 'bold');
-    bctx.font = `bold ${titleSize}px ${FONT}`;
-    bctx.fillStyle = '#e8c86a';
-    bctx.fillText('LIBRARY', BW / 2, BH * 0.4);
 
-    bctx.font = `bold ${libraryBack.fontSize}px ${FONT}`;
-    bctx.fillStyle = '#aaaaaa';
-    bctx.fillText(libraryBack.label, libraryBack.cx, libraryBack.cy);
-  }
+    const innerLeft = libWallT, innerRight = BW - libWallT;
+    const camTop = libCameraY;
 
-  function hitLibrary(bx, by) {
-    const pad = 3;
-    if (bx >= libraryBack.cx - libraryBack.w / 2 - pad && bx <= libraryBack.cx + libraryBack.w / 2 + pad &&
-      by >= libraryBack.cy - libraryBack.h / 2 - pad && by <= libraryBack.cy + libraryBack.h / 2 + pad) {
-      screen = 'map';
+    bctx.fillStyle = '#2a2015';
+    bctx.fillRect(0, 0, innerLeft, BH);
+    bctx.fillRect(innerRight, 0, BW - innerRight, BH);
+
+    const shelfSpacing = 8;
+    const firstRow = Math.floor(camTop / shelfSpacing) - 1;
+    const lastRow = Math.floor((camTop + BH) / shelfSpacing) + 1;
+    for (let r = firstRow; r <= lastRow; r++) {
+      const sy = Math.round(r * shelfSpacing - camTop);
+      const hL = hash1(r * 3.1 + 0.7);
+      const hR = hash1(r * 3.1 + 5.9);
+      bctx.fillStyle = `hsl(${Math.floor(hL * 40 + 20)},50%,${30 + hL * 20}%)`;
+      bctx.fillRect(2, sy, innerLeft - 4, 3);
+      bctx.fillStyle = `hsl(${Math.floor(hR * 40 + 20)},50%,${30 + hR * 20}%)`;
+      bctx.fillRect(innerRight + 2, sy, innerLeft - 4, 3);
     }
+
+    const k0 = Math.floor(camTop / libFloorSpacing) - 1;
+    const k1 = Math.floor((camTop + BH) / libFloorSpacing) + 1;
+    for (let k = k0; k <= k1; k++) {
+      const sy = Math.round(k * libFloorSpacing - camTop);
+      const { gapX, gapW } = floorGap(k);
+      bctx.fillStyle = '#4a3d2a';
+      bctx.fillRect(innerLeft, sy, gapX - innerLeft, 3);
+      bctx.fillRect(gapX + gapW, sy, innerRight - (gapX + gapW), 3);
+    }
+
+    const bandI0 = Math.floor(camTop / libDoorBandH) - 1;
+    const bandI1 = Math.floor((camTop + BH) / libDoorBandH) + 1;
+    for (let i = bandI0; i <= bandI1; i++) {
+      const doorY = doorYForBand(i);
+      const sy = Math.round(doorY - camTop);
+      if (sy < -30 || sy > BH + 30) continue;
+      const doorH = libPlayerH * 1.8;
+      bctx.fillStyle = '#8a5a2a';
+      bctx.fillRect(0, sy - doorH, innerLeft, doorH);
+      bctx.fillStyle = '#3a2410';
+      bctx.fillRect(0, sy - doorH, innerLeft, 2);
+      bctx.fillRect(0, sy - 2, innerLeft, 2);
+    }
+
+    drawLibPlayer(libPlayer.x, Math.round(libPlayer.y - camTop));
+
+    if (libReading) drawBookOverlay();
   }
 
   // ---------------- main loop / resize ----------------
@@ -478,7 +695,32 @@ canvas#gameCanvas {
     if (screen === 'title') hitTitle(x, y);
     else if (screen === 'options') hitOptions(x, y);
     else if (screen === 'map') hitMap(x, y);
-    else if (screen === 'library') hitLibrary(x, y);
+  });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (screen !== 'library') return;
+    if (libReading) { libReading = false; return; }
+    const { x } = screenToBuffer(e.clientX, e.clientY);
+    if (x < BW / 3) libTouch.left = true;
+    else if (x > (BW * 2) / 3) libTouch.right = true;
+    else if (!tryReadBook()) tryJump();
+  });
+  window.addEventListener('pointerup', () => { libTouch.left = false; libTouch.right = false; });
+  canvas.addEventListener('pointercancel', () => { libTouch.left = false; libTouch.right = false; });
+
+  window.addEventListener('keydown', (e) => {
+    if (screen !== 'library') return;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') libKeys.left = true;
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') libKeys.right = true;
+    else if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') && !e.repeat) {
+      if (libReading) libReading = false;
+      else if (!tryReadBook()) tryJump();
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') libKeys.left = false;
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') libKeys.right = false;
   });
 
   let resizeDebounce;
@@ -497,6 +739,7 @@ canvas#gameCanvas {
 
   function renderFrame(now) {
     if (screen === 'map') updatePlayer(now);
+    else if (screen === 'library') updateLibraryPhysics(now);
 
     if (screen === 'title') drawTitle(now);
     else if (screen === 'options') drawOptions();
