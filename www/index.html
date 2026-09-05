@@ -519,7 +519,7 @@ canvas#gameCanvas {
 
   function tryJump() {
     if (libPlayer.onGround) {
-      libPlayer.vy = -4.4;
+      libPlayer.vy = -4.8;
       libPlayer.onGround = false;
     }
   }
@@ -536,7 +536,7 @@ canvas#gameCanvas {
     libPlayer.phase = vx !== 0 ? Math.floor(now / 150) % 2 : 0;
     libPlayer.x = Math.max(innerLeft + halfW, Math.min(innerRight - halfW, libPlayer.x + vx));
 
-    libPlayer.vy = Math.min(libPlayer.vy + 0.35, 5);
+    libPlayer.vy = Math.min(libPlayer.vy + 0.22, 4.5);
     let newY = libPlayer.y + libPlayer.vy;
     const dir = Math.sign(libPlayer.vy);
     if (dir > 0) {
@@ -584,30 +584,33 @@ canvas#gameCanvas {
   }
 
   function drawBookOverlay() {
-    const bw = BW * 0.8, bh = BH * 0.7;
-    const bx = (BW - bw) / 2, by = (BH - bh) / 2;
-    bctx.fillStyle = 'rgba(0,0,0,0.6)';
-    bctx.fillRect(0, 0, BW, BH);
-    bctx.fillStyle = '#e8dcc0';
-    bctx.fillRect(bx, by, bw, bh);
-    bctx.strokeStyle = '#5a4a30';
-    bctx.lineWidth = 2;
-    bctx.strokeRect(bx, by, bw, bh);
+    // Drawn on the real hi-res canvas (not the low-res pixel-art buffer) so
+    // the text stays crisp instead of being blown up into a blurry mess.
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
 
-    bctx.textAlign = 'center';
-    bctx.textBaseline = 'top';
+    const bw = W * 0.8, bh = H * 0.7;
+    const bx = (W - bw) / 2, by = (H - bh) / 2;
+    ctx.fillStyle = '#e8dcc0';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = '#5a4a30';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
     const topMargin = bh * 0.1, bottomReserve = bh * 0.16;
     const contentH = bh - topMargin - bottomReserve;
-    const fontSize = Math.max(4, Math.round(contentH / (libBookLines.length * 1.3)));
-    bctx.font = `bold ${fontSize}px ${FONT}`;
-    bctx.fillStyle = '#2a2015';
+    const fontSize = Math.max(10, Math.round(contentH / (libBookLines.length * 1.3)));
+    ctx.font = `bold ${fontSize}px ${FONT}`;
+    ctx.fillStyle = '#2a2015';
     libBookLines.forEach((line, i) => {
-      bctx.fillText(line.toUpperCase(), BW / 2, by + topMargin + i * fontSize * 1.3);
+      ctx.fillText(line.toUpperCase(), W / 2, by + topMargin + i * fontSize * 1.3);
     });
 
-    bctx.font = `bold ${Math.max(4, Math.round(fontSize * 0.7))}px ${FONT}`;
-    bctx.fillStyle = '#7a6a4a';
-    bctx.fillText('PRESS UP TO CLOSE', BW / 2, by + bh - bottomReserve * 0.7);
+    ctx.font = `bold ${Math.max(9, Math.round(fontSize * 0.7))}px ${FONT}`;
+    ctx.fillStyle = '#7a6a4a';
+    ctx.fillText('PRESS UP TO CLOSE', W / 2, by + bh - bottomReserve * 0.7);
   }
 
   function drawLibrary() {
@@ -659,8 +662,6 @@ canvas#gameCanvas {
     }
 
     drawLibPlayer(libPlayer.x, Math.round(libPlayer.y - camTop));
-
-    if (libReading) drawBookOverlay();
   }
 
   // ---------------- main loop / resize ----------------
@@ -749,6 +750,8 @@ canvas#gameCanvas {
     ctx.clearRect(0, 0, W, H);
     ctx.drawImage(buf, 0, 0, BW, BH, 0, 0, W, H);
     drawScanlines();
+
+    if (screen === 'library' && libReading) drawBookOverlay();
   }
 
   function loop() {
