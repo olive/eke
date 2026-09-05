@@ -595,7 +595,7 @@ canvas#gameCanvas {
       const k = Math.ceil(newY / libFloorSpacing);
       const floorY = k * libFloorSpacing;
       if (floorY < libPlayer.y - 0.01 && floorY >= newY && !inGap(k, libPlayer.x)) {
-        newY = floorY;
+        newY = floorY + libPlayerH;
         libPlayer.vy = 0;
       }
       libPlayer.onGround = false;
