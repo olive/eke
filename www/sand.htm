@@ -1,0 +1,381 @@
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TOWER OF BABEL</title>
+<style>
+:root {
+  --bg: #000000;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.canvasWrap {
+  height: 100vh;
+  height: 100dvh;
+  box-sizing: border-box;
+  position: relative;
+}
+
+canvas#sandCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+}
+
+.clickPrompt {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: clamp(14px, 4vh, 32px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.4s ease;
+}
+.clickPrompt.hidden {
+  opacity: 0;
+}
+</style>
+<div class="canvasWrap" id="canvasWrap">
+  <canvas id="sandCanvas"></canvas>
+  <div class="clickPrompt" id="clickPrompt">click on the screen</div>
+</div>
+<script>
+(function () {
+  const CELL = 6;
+  const EMPTY = 0, SAND = 1, SOLID = 2;
+  const LIFETIME = 10000;
+  const FADE_DURATION = 700;
+  const DEFAULT_TEXT = 'HELLO\nWORLD';
+  let displayText = DEFAULT_TEXT;
+
+  const MAN_W = 12, MAN_H = 24, MAN_SPEED = 1.2, MAN_DEATH_MS = 10000;
+  let manState = 'waiting', manX = 0, manY = 0, manDir = 1, manWalkPhase = 0;
+  let manNextSpawnAt = performance.now() + 2000 + Math.random() * 4000;
+  let manDeathAt = 0;
+
+  const canvas = document.getElementById('sandCanvas');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const canvasWrap = document.getElementById('canvasWrap');
+  const clickPrompt = document.getElementById('clickPrompt');
+
+  const maskCanvas = document.createElement('canvas');
+  const mctx = maskCanvas.getContext('2d');
+
+  const THEMES = {
+    light: { bg: '#000000' },
+    dark: { bg: '#000000' }
+  };
+  function currentTheme() {
+    const attr = document.documentElement.getAttribute('data-theme');
+    if (attr === 'dark') return THEMES.dark;
+    if (attr === 'light') return THEMES.light;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? THEMES.dark : THEMES.light;
+  }
+  let theme = currentTheme();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { theme = currentTheme(); });
+  new MutationObserver(() => { theme = currentTheme(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  let cols, rows, cellType, spawnTime, colR, colG, colB;
+
+  function idx(r, c) { return r * cols + c; }
+
+  function hslToRgb(h, s, l) {
+    h /= 360; s /= 100; l /= 100;
+    let r, g, b;
+    if (s === 0) { r = g = b = l; }
+    else {
+      const hue2rgb = (p, q, t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+        return p;
+      };
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      r = hue2rgb(p, q, h + 1 / 3);
+      g = hue2rgb(p, q, h);
+      b = hue2rgb(p, q, h - 1 / 3);
+    }
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  }
+
+  function randomSandColor() {
+    const h = 30 + Math.random() * 20;
+    const s = 55 + Math.random() * 25;
+    const l = 42 + Math.random() * 28;
+    return hslToRgb(h, s, l);
+  }
+
+  function buildMask(text) {
+    mctx.clearRect(0, 0, canvas.width, canvas.height);
+    const lines = (text || '').split('\n');
+    if (lines.some((l) => l.trim().length > 0)) {
+      mctx.fillStyle = '#000';
+      mctx.textAlign = 'center';
+      mctx.textBaseline = 'middle';
+      const maxW = canvas.width * 0.88;
+      const maxH = canvas.height * 0.7;
+      const lineHeightFactor = 1.2;
+      let lo = 10, hi = Math.floor(canvas.height * 1.3);
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        mctx.font = `400 ${mid}px Arial, "Helvetica Neue", sans-serif`;
+        let maxLineWidth = 0;
+        for (const line of lines) maxLineWidth = Math.max(maxLineWidth, mctx.measureText(line).width);
+        const totalHeight = lines.length * mid * lineHeightFactor;
+        if (maxLineWidth <= maxW && totalHeight <= maxH) lo = mid; else hi = mid - 1;
+      }
+      mctx.font = `400 ${lo}px Arial, "Helvetica Neue", sans-serif`;
+      const lineHeight = lo * lineHeightFactor;
+      const startY = canvas.height / 2 - ((lines.length - 1) * lineHeight) / 2;
+      lines.forEach((line, i) => mctx.fillText(line, canvas.width / 2, startY + i * lineHeight));
+    }
+    const img = mctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const px = Math.min(canvas.width - 1, c * CELL + (CELL >> 1));
+        const py = Math.min(canvas.height - 1, r * CELL + (CELL >> 1));
+        const alpha = img[(py * canvas.width + px) * 4 + 3];
+        const i = idx(r, c);
+        if (alpha > 128) cellType[i] = SOLID;
+        else if (cellType[i] === SOLID) cellType[i] = EMPTY;
+      }
+    }
+  }
+
+  function resizeAndRebuild() {
+    const rect = canvasWrap.getBoundingClientRect();
+    const w = Math.max(300, Math.floor(rect.width));
+    const h = Math.max(220, Math.floor(rect.height));
+    canvas.width = w;
+    canvas.height = h;
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    cols = Math.floor(w / CELL);
+    rows = Math.floor(h / CELL);
+    cellType = new Uint8Array(cols * rows);
+    spawnTime = new Float64Array(cols * rows);
+    colR = new Uint8Array(cols * rows);
+    colG = new Uint8Array(cols * rows);
+    colB = new Uint8Array(cols * rows);
+    buildMask(displayText);
+    manState = 'waiting';
+    manNextSpawnAt = performance.now() + 2000 + Math.random() * 4000;
+  }
+
+  async function loadDisplayText() {
+    try {
+      const res = await fetch('text.txt', { cache: 'no-store' });
+      if (!res.ok) return;
+      const t = (await res.text()).replace(/\r\n/g, '\n').replace(/\n+$/, '');
+      if (t.trim()) {
+        displayText = t;
+        buildMask(displayText);
+      }
+    } catch (e) {}
+  }
+
+  function trySpawn(r, c) {
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
+    const i = idx(r, c);
+    if (cellType[i] !== EMPTY) return false;
+    cellType[i] = SAND;
+    spawnTime[i] = performance.now();
+    const [rr, gg, bb] = randomSandColor();
+    colR[i] = rr; colG[i] = gg; colB[i] = bb;
+    clickPrompt.classList.add('hidden');
+    return true;
+  }
+
+  function spawnBurst(centerC, centerR, count, radius) {
+    let placed = 0, attempts = 0;
+    while (placed < count && attempts < count * 6) {
+      attempts++;
+      const angle = Math.random() * Math.PI * 2;
+      const rad = Math.random() * radius;
+      const c = Math.round(centerC + Math.cos(angle) * rad);
+      const r = Math.round(centerR + Math.sin(angle) * rad);
+      if (trySpawn(r, c)) placed++;
+    }
+  }
+
+  function moveCell(from, to) {
+    cellType[to] = SAND;
+    spawnTime[to] = spawnTime[from];
+    colR[to] = colR[from]; colG[to] = colG[from]; colB[to] = colB[from];
+    cellType[from] = EMPTY;
+  }
+
+  function processCell(r, c, now) {
+    const i = idx(r, c);
+    if (cellType[i] !== SAND) return;
+    const age = now - spawnTime[i];
+    if (age >= LIFETIME + FADE_DURATION) { cellType[i] = EMPTY; return; }
+    if (r + 1 >= rows) return;
+    const below = idx(r + 1, c);
+    if (cellType[below] === EMPTY) { moveCell(i, below); return; }
+    const canLeft = c > 0 && cellType[idx(r + 1, c - 1)] === EMPTY;
+    const canRight = c < cols - 1 && cellType[idx(r + 1, c + 1)] === EMPTY;
+    if (canLeft && canRight) {
+      if (Math.random() < 0.5) moveCell(i, idx(r + 1, c - 1));
+      else moveCell(i, idx(r + 1, c + 1));
+    } else if (canLeft) moveCell(i, idx(r + 1, c - 1));
+    else if (canRight) moveCell(i, idx(r + 1, c + 1));
+  }
+
+  function simulateStep(now) {
+    for (let r = rows - 1; r >= 0; r--) {
+      if (Math.random() < 0.5) {
+        for (let c = 0; c < cols; c++) processCell(r, c, now);
+      } else {
+        for (let c = cols - 1; c >= 0; c--) processCell(r, c, now);
+      }
+    }
+  }
+
+  function manTouchingSand() {
+    const c0 = Math.max(0, Math.floor(manX / CELL));
+    const c1 = Math.min(cols - 1, Math.floor((manX + MAN_W) / CELL));
+    const r0 = Math.max(0, Math.floor(manY / CELL));
+    const r1 = Math.min(rows - 1, Math.floor((manY + MAN_H) / CELL));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (cellType[idx(r, c)] === SAND) return true;
+      }
+    }
+    return false;
+  }
+
+  function updateMan(now) {
+    if (manState === 'waiting') {
+      if (now >= manNextSpawnAt) {
+        manDir = Math.random() < 0.5 ? 1 : -1;
+        manX = manDir === 1 ? -MAN_W : canvas.width;
+        manY = canvas.height - MAN_H;
+        manState = 'walking';
+      }
+    } else if (manState === 'walking') {
+      manX += manDir * MAN_SPEED;
+      manWalkPhase = Math.floor(now / 180) % 2;
+      if (manTouchingSand()) {
+        manState = 'dead';
+        manDeathAt = now;
+      } else if (manX < -MAN_W - 5 || manX > canvas.width + 5) {
+        manState = 'waiting';
+        manNextSpawnAt = now + 5000 + Math.random() * 15000;
+      }
+    } else if (manState === 'dead') {
+      if (now - manDeathAt >= MAN_DEATH_MS) {
+        manState = 'waiting';
+        manNextSpawnAt = now + 5000 + Math.random() * 15000;
+      }
+    }
+  }
+
+  function renderMan(now) {
+    if (manState === 'waiting') return;
+    let alpha = 1;
+    if (manState === 'dead') {
+      const t = now - manDeathAt;
+      if (t > MAN_DEATH_MS - 700) alpha = Math.max(0, (MAN_DEATH_MS - t) / 700);
+    }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (manState === 'dead') {
+      const dir = manDir >= 0 ? 1 : -1;
+      const bodyLen = MAN_H - 6;
+      ctx.fillStyle = '#cfcfcf';
+      ctx.fillRect(manX, manY + MAN_H - 6, bodyLen * dir, 6);
+      ctx.fillRect(manX + bodyLen * dir, manY + MAN_H - 8, 6 * dir, 6);
+    } else {
+      const legOffset = manWalkPhase ? 2 : -2;
+      ctx.fillStyle = '#eaeaea';
+      ctx.fillRect(manX + 2, manY, 8, 8);
+      ctx.fillRect(manX, manY + 8, 12, 8);
+      ctx.fillRect(manX + 2 + legOffset, manY + 16, 4, 8);
+      ctx.fillRect(manX + 6 - legOffset, manY + 16, 4, 8);
+    }
+    ctx.restore();
+  }
+
+  function render(now) {
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = idx(r, c);
+        if (cellType[i] === SAND) {
+          const age = now - spawnTime[i];
+          let alpha = 1;
+          if (age >= LIFETIME) alpha = Math.max(0, 1 - (age - LIFETIME) / FADE_DURATION);
+          ctx.fillStyle = `rgba(${colR[i]},${colG[i]},${colB[i]},${alpha})`;
+          ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+        }
+      }
+    }
+    renderMan(now);
+  }
+
+  let pointerActive = false, pointerCol = 0, pointerRow = 0;
+
+  function pointerToGrid(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    return [Math.floor(x / CELL), Math.floor(y / CELL)];
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    pointerActive = true;
+    const [c, r] = pointerToGrid(e);
+    pointerCol = c; pointerRow = r;
+    spawnBurst(c, r, 40, 5);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    const [c, r] = pointerToGrid(e);
+    pointerCol = c; pointerRow = r;
+  });
+  window.addEventListener('pointerup', () => { pointerActive = false; });
+  canvas.addEventListener('pointercancel', () => { pointerActive = false; });
+
+  let resizeDebounce;
+  const ro = new ResizeObserver(() => {
+    clearTimeout(resizeDebounce);
+    resizeDebounce = setTimeout(resizeAndRebuild, 150);
+  });
+  ro.observe(canvasWrap);
+
+  function loop() {
+    const now = performance.now();
+    if (pointerActive) spawnBurst(pointerCol, pointerRow, 16, 4);
+    simulateStep(now);
+    updateMan(now);
+    render(now);
+    requestAnimationFrame(loop);
+  }
+
+  resizeAndRebuild();
+  loadDisplayText();
+  requestAnimationFrame(loop);
+})();
+</script>

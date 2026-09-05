@@ -2,380 +2,518 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TOWER OF BABEL</title>
 <style>
-:root {
-  --bg: #000000;
-}
-
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
+  background: #000;
 }
-
-.canvasWrap {
+.wrap {
   height: 100vh;
   height: 100dvh;
-  box-sizing: border-box;
   position: relative;
 }
-
-canvas#sandCanvas {
+canvas#gameCanvas {
   display: block;
   width: 100%;
   height: 100%;
   touch-action: none;
   user-select: none;
 }
-
-.clickPrompt {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 10%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-size: clamp(14px, 4vh, 32px);
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-align: center;
-  pointer-events: none;
-  user-select: none;
-  transition: opacity 0.4s ease;
-}
-.clickPrompt.hidden {
-  opacity: 0;
-}
 </style>
-<div class="canvasWrap" id="canvasWrap">
-  <canvas id="sandCanvas"></canvas>
-  <div class="clickPrompt" id="clickPrompt">click on the screen</div>
+<div class="wrap" id="wrap">
+  <canvas id="gameCanvas"></canvas>
 </div>
 <script>
 (function () {
-  const CELL = 6;
-  const EMPTY = 0, SAND = 1, SOLID = 2;
-  const LIFETIME = 10000;
-  const FADE_DURATION = 700;
-  const DEFAULT_TEXT = 'HELLO\nWORLD';
-  let displayText = DEFAULT_TEXT;
+  const PIXEL = 4;
+  const FONT = '"Courier New", monospace';
 
-  const MAN_W = 12, MAN_H = 24, MAN_SPEED = 1.2, MAN_DEATH_MS = 10000;
-  let manState = 'waiting', manX = 0, manY = 0, manDir = 1, manWalkPhase = 0;
-  let manNextSpawnAt = performance.now() + 2000 + Math.random() * 4000;
-  let manDeathAt = 0;
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const wrap = document.getElementById('wrap');
+  const buf = document.createElement('canvas');
+  const bctx = buf.getContext('2d');
 
-  const canvas = document.getElementById('sandCanvas');
-  const ctx = canvas.getContext('2d', { alpha: false });
-  const canvasWrap = document.getElementById('canvasWrap');
-  const clickPrompt = document.getElementById('clickPrompt');
+  let W = 0, H = 0, BW = 0, BH = 0;
+  let screen = 'title';
 
-  const maskCanvas = document.createElement('canvas');
-  const mctx = maskCanvas.getContext('2d');
+  // ---------------- stars ----------------
+  const STAR_COUNT = 70;
+  const stars = Array.from({ length: STAR_COUNT }, () => ({
+    fx: Math.random(),
+    fy: Math.random() * 0.55,
+    phase: Math.random() * Math.PI * 2,
+  }));
 
-  const THEMES = {
-    light: { bg: '#000000' },
-    dark: { bg: '#000000' }
-  };
-  function currentTheme() {
-    const attr = document.documentElement.getAttribute('data-theme');
-    if (attr === 'dark') return THEMES.dark;
-    if (attr === 'light') return THEMES.light;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? THEMES.dark : THEMES.light;
-  }
-  let theme = currentTheme();
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { theme = currentTheme(); });
-  new MutationObserver(() => { theme = currentTheme(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  // ---------------- title screen state ----------------
+  let titleItems = [];
+  let exitAnim = null;
 
-  let cols, rows, cellType, spawnTime, colR, colG, colB;
-
-  function idx(r, c) { return r * cols + c; }
-
-  function hslToRgb(h, s, l) {
-    h /= 360; s /= 100; l /= 100;
-    let r, g, b;
-    if (s === 0) { r = g = b = l; }
-    else {
-      const hue2rgb = (p, q, t) => {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1 / 6) return p + (q - p) * 6 * t;
-        if (t < 1 / 2) return q;
-        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-        return p;
+  function layoutTitle() {
+    bctx.font = `bold 10px ${FONT}`;
+    const titleSize = fitFontSize(['TOWER OF BABEL'], BW * 0.6, BH * 0.16, 1, 'bold');
+    const menuLabels = ['START', 'OPTIONS', 'EXIT'];
+    const menuSize = Math.max(6, Math.round(BH * 0.06));
+    bctx.font = `bold ${menuSize}px ${FONT}`;
+    const startY = BH * 0.56;
+    const gap = menuSize * 2.1;
+    titleItems = menuLabels.map((label, i) => {
+      const w = bctx.measureText(label).width;
+      return {
+        label,
+        cx: BW / 2,
+        cy: startY + i * gap,
+        w,
+        h: menuSize,
+        fontSize: menuSize,
       };
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1 / 3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1 / 3);
+    });
+    titleFontSize = titleSize;
+  }
+  let titleFontSize = 10;
+
+  function fitFontSize(lines, maxW, maxH, lineHeightFactor, weight) {
+    let lo = 4, hi = Math.max(4, Math.floor(maxH));
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      bctx.font = `${weight} ${mid}px ${FONT}`;
+      let maxLineW = 0;
+      for (const l of lines) maxLineW = Math.max(maxLineW, bctx.measureText(l).width);
+      const totalH = lines.length * mid * lineHeightFactor;
+      if (maxLineW <= maxW && totalH <= maxH) lo = mid; else hi = mid - 1;
     }
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    return lo;
   }
 
-  function randomSandColor() {
-    const h = 30 + Math.random() * 20;
-    const s = 55 + Math.random() * 25;
-    const l = 42 + Math.random() * 28;
-    return hslToRgb(h, s, l);
-  }
+  function drawScene(night, now) {
+    bctx.fillStyle = night ? '#05070f' : '#4fa8e0';
+    bctx.fillRect(0, 0, BW, BH);
 
-  function buildMask(text) {
-    mctx.clearRect(0, 0, canvas.width, canvas.height);
-    const lines = (text || '').split('\n');
-    if (lines.some((l) => l.trim().length > 0)) {
-      mctx.fillStyle = '#000';
-      mctx.textAlign = 'center';
-      mctx.textBaseline = 'middle';
-      const maxW = canvas.width * 0.88;
-      const maxH = canvas.height * 0.7;
-      const lineHeightFactor = 1.2;
-      let lo = 10, hi = Math.floor(canvas.height * 1.3);
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        mctx.font = `400 ${mid}px Arial, "Helvetica Neue", sans-serif`;
-        let maxLineWidth = 0;
-        for (const line of lines) maxLineWidth = Math.max(maxLineWidth, mctx.measureText(line).width);
-        const totalHeight = lines.length * mid * lineHeightFactor;
-        if (maxLineWidth <= maxW && totalHeight <= maxH) lo = mid; else hi = mid - 1;
+    if (night) {
+      const t = now / 500;
+      for (const s of stars) {
+        const alpha = 0.4 + 0.5 * Math.max(0, Math.sin(t + s.phase));
+        bctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+        bctx.fillRect(Math.floor(s.fx * BW), Math.floor(s.fy * BH), 1, 1);
       }
-      mctx.font = `400 ${lo}px Arial, "Helvetica Neue", sans-serif`;
-      const lineHeight = lo * lineHeightFactor;
-      const startY = canvas.height / 2 - ((lines.length - 1) * lineHeight) / 2;
-      lines.forEach((line, i) => mctx.fillText(line, canvas.width / 2, startY + i * lineHeight));
-    }
-    const img = mctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const px = Math.min(canvas.width - 1, c * CELL + (CELL >> 1));
-        const py = Math.min(canvas.height - 1, r * CELL + (CELL >> 1));
-        const alpha = img[(py * canvas.width + px) * 4 + 3];
-        const i = idx(r, c);
-        if (alpha > 128) cellType[i] = SOLID;
-        else if (cellType[i] === SOLID) cellType[i] = EMPTY;
-      }
-    }
-  }
-
-  function resizeAndRebuild() {
-    const rect = canvasWrap.getBoundingClientRect();
-    const w = Math.max(300, Math.floor(rect.width));
-    const h = Math.max(220, Math.floor(rect.height));
-    canvas.width = w;
-    canvas.height = h;
-    maskCanvas.width = w;
-    maskCanvas.height = h;
-    cols = Math.floor(w / CELL);
-    rows = Math.floor(h / CELL);
-    cellType = new Uint8Array(cols * rows);
-    spawnTime = new Float64Array(cols * rows);
-    colR = new Uint8Array(cols * rows);
-    colG = new Uint8Array(cols * rows);
-    colB = new Uint8Array(cols * rows);
-    buildMask(displayText);
-    manState = 'waiting';
-    manNextSpawnAt = performance.now() + 2000 + Math.random() * 4000;
-  }
-
-  async function loadDisplayText() {
-    try {
-      const res = await fetch('text.txt', { cache: 'no-store' });
-      if (!res.ok) return;
-      const t = (await res.text()).replace(/\r\n/g, '\n').replace(/\n+$/, '');
-      if (t.trim()) {
-        displayText = t;
-        buildMask(displayText);
-      }
-    } catch (e) {}
-  }
-
-  function trySpawn(r, c) {
-    if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
-    const i = idx(r, c);
-    if (cellType[i] !== EMPTY) return false;
-    cellType[i] = SAND;
-    spawnTime[i] = performance.now();
-    const [rr, gg, bb] = randomSandColor();
-    colR[i] = rr; colG[i] = gg; colB[i] = bb;
-    clickPrompt.classList.add('hidden');
-    return true;
-  }
-
-  function spawnBurst(centerC, centerR, count, radius) {
-    let placed = 0, attempts = 0;
-    while (placed < count && attempts < count * 6) {
-      attempts++;
-      const angle = Math.random() * Math.PI * 2;
-      const rad = Math.random() * radius;
-      const c = Math.round(centerC + Math.cos(angle) * rad);
-      const r = Math.round(centerR + Math.sin(angle) * rad);
-      if (trySpawn(r, c)) placed++;
-    }
-  }
-
-  function moveCell(from, to) {
-    cellType[to] = SAND;
-    spawnTime[to] = spawnTime[from];
-    colR[to] = colR[from]; colG[to] = colG[from]; colB[to] = colB[from];
-    cellType[from] = EMPTY;
-  }
-
-  function processCell(r, c, now) {
-    const i = idx(r, c);
-    if (cellType[i] !== SAND) return;
-    const age = now - spawnTime[i];
-    if (age >= LIFETIME + FADE_DURATION) { cellType[i] = EMPTY; return; }
-    if (r + 1 >= rows) return;
-    const below = idx(r + 1, c);
-    if (cellType[below] === EMPTY) { moveCell(i, below); return; }
-    const canLeft = c > 0 && cellType[idx(r + 1, c - 1)] === EMPTY;
-    const canRight = c < cols - 1 && cellType[idx(r + 1, c + 1)] === EMPTY;
-    if (canLeft && canRight) {
-      if (Math.random() < 0.5) moveCell(i, idx(r + 1, c - 1));
-      else moveCell(i, idx(r + 1, c + 1));
-    } else if (canLeft) moveCell(i, idx(r + 1, c - 1));
-    else if (canRight) moveCell(i, idx(r + 1, c + 1));
-  }
-
-  function simulateStep(now) {
-    for (let r = rows - 1; r >= 0; r--) {
-      if (Math.random() < 0.5) {
-        for (let c = 0; c < cols; c++) processCell(r, c, now);
-      } else {
-        for (let c = cols - 1; c >= 0; c--) processCell(r, c, now);
-      }
-    }
-  }
-
-  function manTouchingSand() {
-    const c0 = Math.max(0, Math.floor(manX / CELL));
-    const c1 = Math.min(cols - 1, Math.floor((manX + MAN_W) / CELL));
-    const r0 = Math.max(0, Math.floor(manY / CELL));
-    const r1 = Math.min(rows - 1, Math.floor((manY + MAN_H) / CELL));
-    for (let r = r0; r <= r1; r++) {
-      for (let c = c0; c <= c1; c++) {
-        if (cellType[idx(r, c)] === SAND) return true;
-      }
-    }
-    return false;
-  }
-
-  function updateMan(now) {
-    if (manState === 'waiting') {
-      if (now >= manNextSpawnAt) {
-        manDir = Math.random() < 0.5 ? 1 : -1;
-        manX = manDir === 1 ? -MAN_W : canvas.width;
-        manY = canvas.height - MAN_H;
-        manState = 'walking';
-      }
-    } else if (manState === 'walking') {
-      manX += manDir * MAN_SPEED;
-      manWalkPhase = Math.floor(now / 180) % 2;
-      if (manTouchingSand()) {
-        manState = 'dead';
-        manDeathAt = now;
-      } else if (manX < -MAN_W - 5 || manX > canvas.width + 5) {
-        manState = 'waiting';
-        manNextSpawnAt = now + 5000 + Math.random() * 15000;
-      }
-    } else if (manState === 'dead') {
-      if (now - manDeathAt >= MAN_DEATH_MS) {
-        manState = 'waiting';
-        manNextSpawnAt = now + 5000 + Math.random() * 15000;
-      }
-    }
-  }
-
-  function renderMan(now) {
-    if (manState === 'waiting') return;
-    let alpha = 1;
-    if (manState === 'dead') {
-      const t = now - manDeathAt;
-      if (t > MAN_DEATH_MS - 700) alpha = Math.max(0, (MAN_DEATH_MS - t) / 700);
-    }
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    if (manState === 'dead') {
-      const dir = manDir >= 0 ? 1 : -1;
-      const bodyLen = MAN_H - 6;
-      ctx.fillStyle = '#cfcfcf';
-      ctx.fillRect(manX, manY + MAN_H - 6, bodyLen * dir, 6);
-      ctx.fillRect(manX + bodyLen * dir, manY + MAN_H - 8, 6 * dir, 6);
+      bctx.fillStyle = '#eef0d8';
+      bctx.beginPath();
+      bctx.arc(BW * 0.88, BH * 0.1, Math.max(3, BH * 0.045), 0, Math.PI * 2);
+      bctx.fill();
     } else {
-      const legOffset = manWalkPhase ? 2 : -2;
-      ctx.fillStyle = '#eaeaea';
-      ctx.fillRect(manX + 2, manY, 8, 8);
-      ctx.fillRect(manX, manY + 8, 12, 8);
-      ctx.fillRect(manX + 2 + legOffset, manY + 16, 4, 8);
-      ctx.fillRect(manX + 6 - legOffset, manY + 16, 4, 8);
+      bctx.fillStyle = '#fff2a8';
+      bctx.beginPath();
+      bctx.arc(BW * 0.88, BH * 0.1, Math.max(3, BH * 0.05), 0, Math.PI * 2);
+      bctx.fill();
     }
-    ctx.restore();
-  }
 
-  function render(now) {
-    ctx.fillStyle = theme.bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const i = idx(r, c);
-        if (cellType[i] === SAND) {
-          const age = now - spawnTime[i];
-          let alpha = 1;
-          if (age >= LIFETIME) alpha = Math.max(0, 1 - (age - LIFETIME) / FADE_DURATION);
-          ctx.fillStyle = `rgba(${colR[i]},${colG[i]},${colB[i]},${alpha})`;
-          ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
-        }
+    const baseY = BH * 0.78;
+    const peakX = BW * 0.5, peakY = BH * 0.28;
+    bctx.fillStyle = night ? '#151a24' : '#5b4a3f';
+    bctx.beginPath();
+    bctx.moveTo(0, baseY);
+    bctx.lineTo(BW * 0.18, BH * 0.55);
+    bctx.lineTo(BW * 0.32, BH * 0.68);
+    bctx.lineTo(peakX, peakY);
+    bctx.lineTo(BW * 0.66, BH * 0.6);
+    bctx.lineTo(BW * 0.82, BH * 0.5);
+    bctx.lineTo(BW, baseY);
+    bctx.closePath();
+    bctx.fill();
+
+    drawTower(peakX, peakY, night, now);
+
+    bctx.fillStyle = night ? '#0a1830' : '#2f7bb0';
+    bctx.fillRect(0, baseY, BW, BH - baseY);
+    const shimmerX = Math.floor(BW * 0.88);
+    for (let y = baseY; y < BH; y += 2) {
+      if (Math.random() > 0.5) {
+        const w = 1 + Math.floor(Math.random() * 3);
+        bctx.fillStyle = night ? 'rgba(220,230,255,0.5)' : 'rgba(255,255,220,0.6)';
+        bctx.fillRect(shimmerX - (w >> 1) + (Math.floor(Math.random() * 3) - 1), y, w, 1);
       }
     }
-    renderMan(now);
   }
 
-  let pointerActive = false, pointerCol = 0, pointerRow = 0;
+  function drawTower(cx, baseY, night, now) {
+    const tiers = 5;
+    const tierH = Math.max(2, Math.round(BH * 0.022));
+    const maxW = Math.max(8, Math.round(BW * 0.1));
+    const blockColor = night ? '#2a2620' : '#8a7355';
+    const edgeColor = night ? '#161310' : '#5b4a35';
+    for (let i = 0; i < tiers; i++) {
+      const w = maxW * (1 - i / tiers) + 3;
+      const y = baseY - (i + 1) * tierH;
+      bctx.fillStyle = blockColor;
+      bctx.fillRect(Math.round(cx - w / 2), Math.round(y), Math.round(w), tierH - 1);
+      bctx.fillStyle = edgeColor;
+      bctx.fillRect(Math.round(cx - w / 2), Math.round(y), 1, tierH - 1);
+      bctx.fillRect(Math.round(cx + w / 2 - 1), Math.round(y), 1, tierH - 1);
+    }
+    const topY = baseY - tiers * tierH;
+    bctx.fillStyle = night ? '#3a3020' : '#6b5a40';
+    bctx.fillRect(Math.round(cx - 1), topY - 6, 1, 6);
+    bctx.fillRect(Math.round(cx - 4), topY - 6, 8, 1);
 
-  function pointerToGrid(e) {
+    const bob = Math.floor(now / 400) % 2;
+    const workerColor = night ? '#c9c2b0' : '#3a2a1a';
+    const positions = [
+      [cx - maxW * 0.3, baseY - tierH * 1],
+      [cx + maxW * 0.22, baseY - tierH * 3],
+      [cx - maxW * 0.08, baseY - tierH * 4.6],
+    ];
+    for (const [wx, wy] of positions) {
+      bctx.fillStyle = workerColor;
+      bctx.fillRect(Math.round(wx), Math.round(wy - bob), 1, 1);
+    }
+  }
+
+  function drawTitle(now) {
+    drawScene(true, now);
+    bctx.textAlign = 'center';
+    bctx.textBaseline = 'middle';
+
+    bctx.font = `bold ${titleFontSize}px ${FONT}`;
+    bctx.fillStyle = '#e8c86a';
+    bctx.fillText('TOWER OF BABEL', BW / 2, BH * 0.14);
+
+    for (const item of titleItems) {
+      if (item.label === 'EXIT' && exitAnim) continue;
+      bctx.font = `bold ${item.fontSize}px ${FONT}`;
+      bctx.fillStyle = '#ffffff';
+      bctx.fillText(item.label, item.cx, item.cy);
+    }
+
+    if (exitAnim) drawExitAnim(now);
+  }
+
+  function startExitFall() {
+    const item = titleItems.find((i) => i.label === 'EXIT');
+    exitAnim = {
+      phase: 'falling',
+      x: item.cx,
+      y: item.cy,
+      vy: 0,
+      fontSize: item.fontSize,
+      shards: [],
+      shatterAt: 0,
+    };
+  }
+
+  function drawExitAnim(now) {
+    if (exitAnim.phase === 'falling') {
+      exitAnim.vy += 0.35;
+      exitAnim.y += exitAnim.vy;
+      if (exitAnim.y >= BH - 4) {
+        exitAnim.y = BH - 4;
+        exitAnim.phase = 'shattered';
+        exitAnim.shatterAt = now;
+        const shardCount = 18;
+        for (let i = 0; i < shardCount; i++) {
+          const angle = Math.random() * Math.PI - Math.PI / 2 - Math.PI / 2;
+          const speed = 0.6 + Math.random() * 1.8;
+          exitAnim.shards.push({
+            x: exitAnim.x + (Math.random() - 0.5) * exitAnim.fontSize * 2,
+            y: exitAnim.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 1.5,
+            size: 1 + Math.random() * 2,
+            rot: Math.random() * Math.PI,
+          });
+        }
+      } else {
+        bctx.font = `bold ${exitAnim.fontSize}px ${FONT}`;
+        bctx.fillStyle = '#ffffff';
+        bctx.fillText('EXIT', exitAnim.x, exitAnim.y);
+      }
+    } else if (exitAnim.phase === 'shattered') {
+      const age = now - exitAnim.shatterAt;
+      const alpha = Math.max(0, 1 - age / 900);
+      for (const s of exitAnim.shards) {
+        s.vy += 0.25;
+        s.x += s.vx;
+        s.y += s.vy;
+        if (s.y > BH) { s.y = BH; s.vy *= -0.3; }
+        bctx.fillStyle = `rgba(223,243,255,${alpha.toFixed(2)})`;
+        bctx.fillRect(Math.round(s.x), Math.round(s.y), Math.ceil(s.size), Math.ceil(s.size));
+      }
+      if (age > 3000) exitAnim = null;
+    }
+  }
+
+  function hitTitle(bx, by) {
+    if (exitAnim) return;
+    for (const item of titleItems) {
+      const pad = 2;
+      if (bx >= item.cx - item.w / 2 - pad && bx <= item.cx + item.w / 2 + pad &&
+        by >= item.cy - item.h / 2 - pad && by <= item.cy + item.h / 2 + pad) {
+        if (item.label === 'START') screen = 'map';
+        else if (item.label === 'OPTIONS') screen = 'options';
+        else if (item.label === 'EXIT') startExitFall();
+        return;
+      }
+    }
+  }
+
+  // ---------------- options screen ----------------
+  const OPTIONS_LINES = [
+    'YOU ALWAYS HAVE OPTIONS',
+    'YOU CAN ALWAYS CHOOSE',
+    'YOU CAN CHANGE THINGS',
+    'BEFORE ITS TOO LATE',
+  ];
+  let optionsFontSize = 10, optionsLineHeight = 12, backItem = null;
+
+  function layoutOptions() {
+    optionsFontSize = fitFontSize(OPTIONS_LINES, BW * 0.9, BH * 0.7, 1.15, 'bold');
+    optionsLineHeight = optionsFontSize * 1.15;
+    const backSize = Math.max(5, Math.round(BH * 0.045));
+    bctx.font = `bold ${backSize}px ${FONT}`;
+    backItem = {
+      label: 'BACK',
+      cx: BW / 2,
+      cy: BH * 0.92,
+      w: bctx.measureText('BACK').width,
+      h: backSize,
+      fontSize: backSize,
+    };
+  }
+
+  function drawOptions() {
+    bctx.fillStyle = '#000000';
+    bctx.fillRect(0, 0, BW, BH);
+    bctx.textAlign = 'center';
+    bctx.textBaseline = 'middle';
+    bctx.font = `bold ${optionsFontSize}px ${FONT}`;
+    bctx.fillStyle = '#ffffff';
+    const startY = BH / 2 - ((OPTIONS_LINES.length - 1) * optionsLineHeight) / 2;
+    OPTIONS_LINES.forEach((line, i) => {
+      bctx.fillText(line, BW / 2, startY + i * optionsLineHeight);
+    });
+    bctx.font = `bold ${backItem.fontSize}px ${FONT}`;
+    bctx.fillStyle = '#aaaaaa';
+    bctx.fillText(backItem.label, backItem.cx, backItem.cy);
+  }
+
+  function hitOptions(bx, by) {
+    const pad = 3;
+    if (bx >= backItem.cx - backItem.w / 2 - pad && bx <= backItem.cx + backItem.w / 2 + pad &&
+      by >= backItem.cy - backItem.h / 2 - pad && by <= backItem.cy + backItem.h / 2 + pad) {
+      screen = 'title';
+    }
+  }
+
+  // ---------------- map screen ----------------
+  let nodes = {};
+  let player = { x: 0, y: 0, atNode: 'start', walking: false, walkFrom: null, walkTo: null, walkStart: 0, walkDur: 1200, phase: 0 };
+
+  function layoutMap() {
+    nodes = {
+      start: { x: BW * 0.14, y: BH * 0.82, label: 'START', selectable: false },
+      library: { x: BW * 0.36, y: BH * 0.6, label: 'LIBRARY', selectable: true },
+    };
+    if (!player.walking) {
+      const n = nodes[player.atNode];
+      player.x = n.x;
+      player.y = n.y;
+    }
+  }
+
+  function updatePlayer(now) {
+    if (!player.walking) return;
+    const t = Math.min(1, (now - player.walkStart) / player.walkDur);
+    const from = player.walkFrom, to = player.walkTo;
+    const midX = (from.x + to.x) / 2;
+    const midY = Math.min(from.y, to.y) - Math.abs(to.x - from.x) * 0.15;
+    const a = lerp2(from, { x: midX, y: midY }, t);
+    const b = lerp2({ x: midX, y: midY }, to, t);
+    player.x = lerp(a.x, b.x, t);
+    player.y = lerp(a.y, b.y, t);
+    player.phase = Math.floor(now / 150) % 2;
+    if (t >= 1) {
+      player.walking = false;
+      player.atNode = 'library';
+      player.x = to.x;
+      player.y = to.y;
+    }
+  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function lerp2(p1, p2, t) { return { x: lerp(p1.x, p2.x, t), y: lerp(p1.y, p2.y, t) }; }
+
+  function drawMap(now) {
+    drawScene(false, now);
+
+    bctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    bctx.lineWidth = 1;
+    bctx.setLineDash([2, 2]);
+    bctx.beginPath();
+    bctx.moveTo(nodes.start.x, nodes.start.y);
+    bctx.lineTo(nodes.library.x, nodes.library.y);
+    bctx.stroke();
+    bctx.setLineDash([]);
+
+    bctx.textAlign = 'center';
+    bctx.textBaseline = 'middle';
+    const labelSize = Math.max(5, Math.round(BH * 0.035));
+    bctx.font = `bold ${labelSize}px ${FONT}`;
+
+    bctx.fillStyle = '#888888';
+    bctx.beginPath();
+    bctx.arc(nodes.start.x, nodes.start.y, Math.max(2, BH * 0.015), 0, Math.PI * 2);
+    bctx.fill();
+    bctx.fillStyle = '#cccccc';
+    bctx.fillText(nodes.start.label, nodes.start.x, nodes.start.y + labelSize * 1.4);
+
+    const pulse = 0.7 + 0.3 * Math.sin(now / 300);
+    bctx.fillStyle = `rgba(255,220,90,${pulse.toFixed(2)})`;
+    bctx.beginPath();
+    bctx.arc(nodes.library.x, nodes.library.y, Math.max(2, BH * 0.018), 0, Math.PI * 2);
+    bctx.fill();
+    bctx.fillStyle = '#ffdc5a';
+    bctx.fillText(nodes.library.label, nodes.library.x, nodes.library.y - labelSize * 1.6);
+
+    drawPlayer();
+  }
+
+  function drawPlayer() {
+    const h = Math.max(4, Math.round(BH * 0.045));
+    const w = Math.max(3, Math.round(h * 0.6));
+    const x = Math.round(player.x - w / 2);
+    const y = Math.round(player.y - h);
+    bctx.fillStyle = '#f0e8d8';
+    bctx.fillRect(x, y, w, Math.max(1, Math.round(h * 0.35)));
+    bctx.fillStyle = '#c0392b';
+    bctx.fillRect(x, y + Math.round(h * 0.35), w, Math.max(1, Math.round(h * 0.4)));
+    const legOff = player.walking ? (player.phase ? 1 : -1) : 0;
+    bctx.fillStyle = '#3a3a3a';
+    bctx.fillRect(x + legOff, y + Math.round(h * 0.75), Math.max(1, Math.round(w * 0.4)), Math.round(h * 0.25));
+    bctx.fillRect(x + w - Math.round(w * 0.4) - legOff, y + Math.round(h * 0.75), Math.max(1, Math.round(w * 0.4)), Math.round(h * 0.25));
+  }
+
+  function hitMap(bx, by) {
+    if (player.walking) return;
+    const n = nodes.library;
+    const r = Math.max(4, BH * 0.03);
+    if (Math.hypot(bx - n.x, by - n.y) <= r) {
+      if (player.atNode === 'library') {
+        screen = 'library';
+      } else {
+        player.walking = true;
+        player.walkFrom = { x: player.x, y: player.y };
+        player.walkTo = { x: n.x, y: n.y };
+        player.walkStart = performance.now();
+      }
+    }
+  }
+
+  // ---------------- library screen ----------------
+  let libraryBack = null;
+  function layoutLibrary() {
+    const size = Math.max(5, Math.round(BH * 0.045));
+    bctx.font = `bold ${size}px ${FONT}`;
+    libraryBack = {
+      label: 'BACK TO MAP',
+      cx: BW / 2,
+      cy: BH * 0.9,
+      w: bctx.measureText('BACK TO MAP').width,
+      h: size,
+      fontSize: size,
+    };
+  }
+
+  function drawLibrary() {
+    bctx.fillStyle = '#0c0a08';
+    bctx.fillRect(0, 0, BW, BH);
+    bctx.textAlign = 'center';
+    bctx.textBaseline = 'middle';
+    const titleSize = fitFontSize(['LIBRARY'], BW * 0.8, BH * 0.2, 1, 'bold');
+    bctx.font = `bold ${titleSize}px ${FONT}`;
+    bctx.fillStyle = '#e8c86a';
+    bctx.fillText('LIBRARY', BW / 2, BH * 0.4);
+
+    bctx.font = `bold ${libraryBack.fontSize}px ${FONT}`;
+    bctx.fillStyle = '#aaaaaa';
+    bctx.fillText(libraryBack.label, libraryBack.cx, libraryBack.cy);
+  }
+
+  function hitLibrary(bx, by) {
+    const pad = 3;
+    if (bx >= libraryBack.cx - libraryBack.w / 2 - pad && bx <= libraryBack.cx + libraryBack.w / 2 + pad &&
+      by >= libraryBack.cy - libraryBack.h / 2 - pad && by <= libraryBack.cy + libraryBack.h / 2 + pad) {
+      screen = 'map';
+    }
+  }
+
+  // ---------------- main loop / resize ----------------
+  function resize() {
+    const rect = wrap.getBoundingClientRect();
+    W = Math.max(200, Math.floor(rect.width));
+    H = Math.max(200, Math.floor(rect.height));
+    canvas.width = W;
+    canvas.height = H;
+    BW = Math.max(80, Math.floor(W / PIXEL));
+    BH = Math.max(60, Math.floor(H / PIXEL));
+    buf.width = BW;
+    buf.height = BH;
+    bctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = false;
+    layoutTitle();
+    layoutOptions();
+    layoutMap();
+    layoutLibrary();
+  }
+
+  function screenToBuffer(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-    return [Math.floor(x / CELL), Math.floor(y / CELL)];
+    return {
+      x: (clientX - rect.left) * (BW / rect.width),
+      y: (clientY - rect.top) * (BH / rect.height),
+    };
   }
 
-  canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
-    pointerActive = true;
-    const [c, r] = pointerToGrid(e);
-    pointerCol = c; pointerRow = r;
-    spawnBurst(c, r, 40, 5);
+  canvas.addEventListener('click', (e) => {
+    const { x, y } = screenToBuffer(e.clientX, e.clientY);
+    if (screen === 'title') hitTitle(x, y);
+    else if (screen === 'options') hitOptions(x, y);
+    else if (screen === 'map') hitMap(x, y);
+    else if (screen === 'library') hitLibrary(x, y);
   });
-  canvas.addEventListener('pointermove', (e) => {
-    const [c, r] = pointerToGrid(e);
-    pointerCol = c; pointerRow = r;
-  });
-  window.addEventListener('pointerup', () => { pointerActive = false; });
-  canvas.addEventListener('pointercancel', () => { pointerActive = false; });
 
   let resizeDebounce;
   const ro = new ResizeObserver(() => {
     clearTimeout(resizeDebounce);
-    resizeDebounce = setTimeout(resizeAndRebuild, 150);
+    resizeDebounce = setTimeout(resize, 150);
   });
-  ro.observe(canvasWrap);
+  ro.observe(wrap);
+
+  function drawScanlines() {
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    for (let y = 0; y < H; y += 3) {
+      ctx.fillRect(0, y, W, 1);
+    }
+  }
+
+  function renderFrame(now) {
+    if (screen === 'map') updatePlayer(now);
+
+    if (screen === 'title') drawTitle(now);
+    else if (screen === 'options') drawOptions();
+    else if (screen === 'map') drawMap(now);
+    else if (screen === 'library') drawLibrary();
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(buf, 0, 0, BW, BH, 0, 0, W, H);
+    drawScanlines();
+  }
 
   function loop() {
-    const now = performance.now();
-    if (pointerActive) spawnBurst(pointerCol, pointerRow, 16, 4);
-    simulateStep(now);
-    updateMan(now);
-    render(now);
+    renderFrame(performance.now());
     requestAnimationFrame(loop);
   }
 
-  resizeAndRebuild();
-  loadDisplayText();
+  resize();
   requestAnimationFrame(loop);
 })();
 </script>
