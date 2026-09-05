@@ -172,21 +172,30 @@ canvas#gameCanvas {
 
   function drawTitle(now) {
     drawScene(true, now);
-    bctx.textAlign = 'center';
-    bctx.textBaseline = 'middle';
+    if (exitAnim) updateExitAnim(now);
+  }
 
-    bctx.font = `bold ${titleFontSize}px ${FONT}`;
-    bctx.fillStyle = '#e8c86a';
-    bctx.fillText('TOWER OF BABEL', BW / 2, BH * 0.14);
+  function drawTitleTextHiRes(now) {
+    const S = PIXEL;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.font = `bold ${titleFontSize * S}px ${FONT}`;
+    ctx.fillStyle = '#e8c86a';
+    ctx.fillText('TOWER OF BABEL', (BW / 2) * S, (BH * 0.14) * S);
 
     for (const item of titleItems) {
       if (item.label === 'EXIT' && exitAnim) continue;
-      bctx.font = `bold ${item.fontSize}px ${FONT}`;
-      bctx.fillStyle = '#ffffff';
-      bctx.fillText(item.label, item.cx, item.cy);
+      ctx.font = `bold ${item.fontSize * S}px ${FONT}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(item.label, item.cx * S, item.cy * S);
     }
 
-    if (exitAnim) drawExitAnim(now);
+    if (exitAnim && exitAnim.phase === 'falling') {
+      ctx.font = `bold ${exitAnim.fontSize * S}px ${FONT}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('EXIT', exitAnim.x * S, exitAnim.y * S);
+    }
   }
 
   function startExitFall() {
@@ -202,7 +211,7 @@ canvas#gameCanvas {
     };
   }
 
-  function drawExitAnim(now) {
+  function updateExitAnim(now) {
     if (exitAnim.phase === 'falling') {
       exitAnim.vy += 0.35;
       exitAnim.y += exitAnim.vy;
@@ -223,10 +232,6 @@ canvas#gameCanvas {
             rot: Math.random() * Math.PI,
           });
         }
-      } else {
-        bctx.font = `bold ${exitAnim.fontSize}px ${FONT}`;
-        bctx.fillStyle = '#ffffff';
-        bctx.fillText('EXIT', exitAnim.x, exitAnim.y);
       }
     } else if (exitAnim.phase === 'shattered') {
       const age = now - exitAnim.shatterAt;
@@ -284,17 +289,21 @@ canvas#gameCanvas {
   function drawOptions() {
     bctx.fillStyle = '#000000';
     bctx.fillRect(0, 0, BW, BH);
-    bctx.textAlign = 'center';
-    bctx.textBaseline = 'middle';
-    bctx.font = `bold ${optionsFontSize}px ${FONT}`;
-    bctx.fillStyle = '#ffffff';
-    const startY = BH / 2 - ((OPTIONS_LINES.length - 1) * optionsLineHeight) / 2;
+  }
+
+  function drawOptionsTextHiRes() {
+    const S = PIXEL;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${optionsFontSize * S}px ${FONT}`;
+    ctx.fillStyle = '#ffffff';
+    const startY = (BH / 2 - ((OPTIONS_LINES.length - 1) * optionsLineHeight) / 2) * S;
     OPTIONS_LINES.forEach((line, i) => {
-      bctx.fillText(line, BW / 2, startY + i * optionsLineHeight);
+      ctx.fillText(line, (BW / 2) * S, startY + i * optionsLineHeight * S);
     });
-    bctx.font = `bold ${backItem.fontSize}px ${FONT}`;
-    bctx.fillStyle = '#aaaaaa';
-    bctx.fillText(backItem.label, backItem.cx, backItem.cy);
+    ctx.font = `bold ${backItem.fontSize * S}px ${FONT}`;
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillText(backItem.label, backItem.cx * S, backItem.cy * S);
   }
 
   function hitOptions(bx, by) {
@@ -354,27 +363,32 @@ canvas#gameCanvas {
     bctx.stroke();
     bctx.setLineDash([]);
 
-    bctx.textAlign = 'center';
-    bctx.textBaseline = 'middle';
-    const labelSize = Math.max(5, Math.round(BH * 0.035));
-    bctx.font = `bold ${labelSize}px ${FONT}`;
-
     bctx.fillStyle = '#888888';
     bctx.beginPath();
     bctx.arc(nodes.start.x, nodes.start.y, Math.max(2, BH * 0.015), 0, Math.PI * 2);
     bctx.fill();
-    bctx.fillStyle = '#cccccc';
-    bctx.fillText(nodes.start.label, nodes.start.x, nodes.start.y + labelSize * 1.4);
 
     const pulse = 0.7 + 0.3 * Math.sin(now / 300);
     bctx.fillStyle = `rgba(255,220,90,${pulse.toFixed(2)})`;
     bctx.beginPath();
     bctx.arc(nodes.library.x, nodes.library.y, Math.max(2, BH * 0.018), 0, Math.PI * 2);
     bctx.fill();
-    bctx.fillStyle = '#ffdc5a';
-    bctx.fillText(nodes.library.label, nodes.library.x, nodes.library.y - labelSize * 1.6);
 
     drawPlayer();
+  }
+
+  function drawMapTextHiRes() {
+    const S = PIXEL;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const labelSize = Math.max(5, Math.round(BH * 0.035));
+    ctx.font = `bold ${labelSize * S}px ${FONT}`;
+
+    ctx.fillStyle = '#cccccc';
+    ctx.fillText(nodes.start.label, nodes.start.x * S, (nodes.start.y + labelSize * 1.4) * S);
+
+    ctx.fillStyle = '#ffdc5a';
+    ctx.fillText(nodes.library.label, nodes.library.x * S, (nodes.library.y - labelSize * 1.6) * S);
   }
 
   function drawPlayer() {
@@ -519,7 +533,7 @@ canvas#gameCanvas {
 
   function tryJump() {
     if (libPlayer.onGround) {
-      libPlayer.vy = -4.8;
+      libPlayer.vy = -4;
       libPlayer.onGround = false;
     }
   }
@@ -536,7 +550,7 @@ canvas#gameCanvas {
     libPlayer.phase = vx !== 0 ? Math.floor(now / 150) % 2 : 0;
     libPlayer.x = Math.max(innerLeft + halfW, Math.min(innerRight - halfW, libPlayer.x + vx));
 
-    libPlayer.vy = Math.min(libPlayer.vy + 0.22, 4.5);
+    libPlayer.vy = Math.min(libPlayer.vy + 0.14, 3.4);
     let newY = libPlayer.y + libPlayer.vy;
     const dir = Math.sign(libPlayer.vy);
     if (dir > 0) {
@@ -751,7 +765,10 @@ canvas#gameCanvas {
     ctx.drawImage(buf, 0, 0, BW, BH, 0, 0, W, H);
     drawScanlines();
 
-    if (screen === 'library' && libReading) drawBookOverlay();
+    if (screen === 'title') drawTitleTextHiRes(now);
+    else if (screen === 'options') drawOptionsTextHiRes();
+    else if (screen === 'map') drawMapTextHiRes();
+    else if (screen === 'library' && libReading) drawBookOverlay();
   }
 
   function loop() {
