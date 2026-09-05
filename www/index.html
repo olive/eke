@@ -457,6 +457,8 @@ canvas#gameCanvas {
   let libPlayer = null, libCameraY = 0, libReading = false, libBookLines = [];
   const libKeys = { left: false, right: false };
   const libTouch = { left: false, right: false };
+  let bitcoinCount = 0;
+  const collectedCoinFloors = new Set();
 
   function hash1(n) {
     const x = Math.sin(n * 12.9898) * 43758.5453;
@@ -499,6 +501,21 @@ canvas#gameCanvas {
   function inGap(k, x) {
     const { gapX, gapW } = floorGap(k);
     return x >= gapX && x <= gapX + gapW;
+  }
+
+  function coinForFloor(k) {
+    if (k === 0 || isDoorFloor(k)) return null;
+    const hExists = hash1(k * 8.233 + 4.71);
+    if (hExists > 0.4) return null;
+    const innerLeft = libWallT, innerRight = BW - libWallT;
+    const { gapX, gapW } = floorGap(k);
+    const leftSpan = gapX - innerLeft;
+    const rightSpan = innerRight - (gapX + gapW);
+    const hSide = hash1(k * 3.71 + 9.1);
+    let x;
+    if (leftSpan > rightSpan) x = innerLeft + hSide * Math.max(1, leftSpan);
+    else x = gapX + gapW + hSide * Math.max(1, rightSpan);
+    return { x, y: k * libFloorSpacing - Math.max(3, Math.round(libPlayerH * 0.4)) };
   }
 
   function doorYForBand(i) {
@@ -609,6 +626,24 @@ canvas#gameCanvas {
     if (nearLeftWall && Math.abs((libPlayer.y - libPlayerH / 2) - doorY) <= libPlayerH * 0.7) {
       screen = 'map';
     }
+
+    checkCoinPickup();
+  }
+
+  function checkCoinPickup() {
+    const k = Math.round(libPlayer.y / libFloorSpacing);
+    if (collectedCoinFloors.has(k)) return;
+    const coin = coinForFloor(k);
+    if (!coin) return;
+    const halfW = libPlayerW / 2;
+    const coinHalf = Math.max(3, Math.round(libPlayerH * 0.35));
+    const playerLeft = libPlayer.x - halfW, playerRight = libPlayer.x + halfW;
+    const playerTop = libPlayer.y - libPlayerH, playerBottom = libPlayer.y;
+    if (playerRight >= coin.x - coinHalf && playerLeft <= coin.x + coinHalf &&
+      playerBottom >= coin.y - coinHalf && playerTop <= coin.y + coinHalf) {
+      collectedCoinFloors.add(k);
+      bitcoinCount++;
+    }
   }
 
   function drawLibPlayer(cx, feetY) {
@@ -623,6 +658,20 @@ canvas#gameCanvas {
     bctx.fillStyle = '#3a3a3a';
     bctx.fillRect(x + legOff, y + Math.round(h * 0.75), Math.max(1, Math.round(w * 0.4)), Math.round(h * 0.25));
     bctx.fillRect(x + w - Math.round(w * 0.4) - legOff, y + Math.round(h * 0.75), Math.max(1, Math.round(w * 0.4)), Math.round(h * 0.25));
+  }
+
+  function drawBitcoinHUD() {
+    const size = Math.max(14, Math.round(H * 0.035));
+    const pad = size * 0.5;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = `bold ${size}px ${FONT}`;
+    const text = `₿ ${bitcoinCount}`;
+    const w = ctx.measureText(text).width + pad * 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(pad * 0.5, pad * 0.5, w, size + pad);
+    ctx.fillStyle = '#f0b90b';
+    ctx.fillText(text, pad, pad);
   }
 
   function drawBookOverlay() {
@@ -670,6 +719,18 @@ canvas#gameCanvas {
     bctx.fill();
   }
 
+  function drawCoin(cx, sy, now) {
+    const r = Math.max(2, Math.round(BH * 0.016));
+    const bob = Math.sin(now / 300 + cx) * 1;
+    const y = sy + bob;
+    bctx.fillStyle = '#f0b90b';
+    bctx.beginPath();
+    bctx.arc(cx, y, r, 0, Math.PI * 2);
+    bctx.fill();
+    bctx.fillStyle = '#8a5a00';
+    bctx.fillRect(Math.round(cx), Math.round(y - r * 0.7), 1, Math.max(1, Math.round(r * 1.4)));
+  }
+
   function drawLibrary(now) {
     bctx.fillStyle = '#161008';
     bctx.fillRect(0, 0, BW, BH);
@@ -702,6 +763,11 @@ canvas#gameCanvas {
       bctx.fillStyle = '#4a3d2a';
       bctx.fillRect(innerLeft, sy, gapX - innerLeft, 3);
       bctx.fillRect(gapX + gapW, sy, innerRight - (gapX + gapW), 3);
+
+      if (!collectedCoinFloors.has(k)) {
+        const coin = coinForFloor(k);
+        if (coin) drawCoin(coin.x, coin.y - camTop, now);
+      }
     }
 
     const bandI0 = Math.floor(camTop / libDoorBandH) - 1;
@@ -813,10 +879,17 @@ canvas#gameCanvas {
     ctx.drawImage(buf, 0, 0, BW, BH, 0, 0, W, H);
     drawScanlines();
 
-    if (screen === 'title') drawTitleTextHiRes(now);
-    else if (screen === 'options') drawOptionsTextHiRes();
-    else if (screen === 'map') drawMapTextHiRes();
-    else if (screen === 'library' && libReading) drawBookOverlay();
+    if (screen === 'title') {
+      drawTitleTextHiRes(now);
+    } else if (screen === 'options') {
+      drawOptionsTextHiRes();
+    } else if (screen === 'map') {
+      drawMapTextHiRes();
+      drawBitcoinHUD();
+    } else if (screen === 'library') {
+      drawBitcoinHUD();
+      if (libReading) drawBookOverlay();
+    }
   }
 
   function loop() {
