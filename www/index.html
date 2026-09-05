@@ -28,7 +28,8 @@ canvas#sandCanvas {
   const EMPTY = 0, SAND = 1, SOLID = 2;
   const LIFETIME = 10000;
   const FADE_DURATION = 700;
-  const DISPLAY_TEXT = 'HELLO\nWORLD';
+  const DEFAULT_TEXT = 'HELLO\nWORLD';
+  let displayText = DEFAULT_TEXT;
 
   const canvas = document.getElementById('sandCanvas');
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -136,7 +137,19 @@ canvas#sandCanvas {
     colR = new Uint8Array(cols * rows);
     colG = new Uint8Array(cols * rows);
     colB = new Uint8Array(cols * rows);
-    buildMask(DISPLAY_TEXT);
+    buildMask(displayText);
+  }
+
+  async function loadDisplayText() {
+    try {
+      const res = await fetch('text.txt', { cache: 'no-store' });
+      if (!res.ok) return;
+      const t = (await res.text()).replace(/\r\n/g, '\n').replace(/\n+$/, '');
+      if (t.trim()) {
+        displayText = t;
+        buildMask(displayText);
+      }
+    } catch (e) {}
   }
 
   function trySpawn(r, c) {
@@ -227,7 +240,7 @@ canvas#sandCanvas {
     pointerActive = true;
     const [c, r] = pointerToGrid(e);
     pointerCol = c; pointerRow = r;
-    spawnBurst(c, r, 14, 3);
+    spawnBurst(c, r, 40, 5);
   });
   canvas.addEventListener('pointermove', (e) => {
     const [c, r] = pointerToGrid(e);
@@ -245,13 +258,14 @@ canvas#sandCanvas {
 
   function loop() {
     const now = performance.now();
-    if (pointerActive) spawnBurst(pointerCol, pointerRow, 4, 2);
+    if (pointerActive) spawnBurst(pointerCol, pointerRow, 16, 4);
     simulateStep(now);
     render(now);
     requestAnimationFrame(loop);
   }
 
   resizeAndRebuild();
+  loadDisplayText();
   requestAnimationFrame(loop);
 })();
 </script>
