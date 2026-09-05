@@ -31,6 +31,11 @@ canvas#sandCanvas {
   const DEFAULT_TEXT = 'HELLO\nWORLD';
   let displayText = DEFAULT_TEXT;
 
+  const MAN_W = 12, MAN_H = 24, MAN_SPEED = 1.2, MAN_DEATH_MS = 10000;
+  let manState = 'waiting', manX = 0, manY = 0, manDir = 1, manWalkPhase = 0;
+  let manNextSpawnAt = performance.now() + 2000 + Math.random() * 4000;
+  let manDeathAt = 0;
+
   const canvas = document.getElementById('sandCanvas');
   const ctx = canvas.getContext('2d', { alpha: false });
   const canvasWrap = document.getElementById('canvasWrap');
@@ -138,6 +143,8 @@ canvas#sandCanvas {
     colG = new Uint8Array(cols * rows);
     colB = new Uint8Array(cols * rows);
     buildMask(displayText);
+    manState = 'waiting';
+    manNextSpawnAt = performance.now() + 2000 + Math.random() * 4000;
   }
 
   async function loadDisplayText() {
@@ -209,6 +216,71 @@ canvas#sandCanvas {
     }
   }
 
+  function manTouchingSand() {
+    const c0 = Math.max(0, Math.floor(manX / CELL));
+    const c1 = Math.min(cols - 1, Math.floor((manX + MAN_W) / CELL));
+    const r0 = Math.max(0, Math.floor(manY / CELL));
+    const r1 = Math.min(rows - 1, Math.floor((manY + MAN_H) / CELL));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (cellType[idx(r, c)] === SAND) return true;
+      }
+    }
+    return false;
+  }
+
+  function updateMan(now) {
+    if (manState === 'waiting') {
+      if (now >= manNextSpawnAt) {
+        manDir = Math.random() < 0.5 ? 1 : -1;
+        manX = manDir === 1 ? -MAN_W : canvas.width;
+        manY = canvas.height - MAN_H;
+        manState = 'walking';
+      }
+    } else if (manState === 'walking') {
+      manX += manDir * MAN_SPEED;
+      manWalkPhase = Math.floor(now / 180) % 2;
+      if (manTouchingSand()) {
+        manState = 'dead';
+        manDeathAt = now;
+      } else if (manX < -MAN_W - 5 || manX > canvas.width + 5) {
+        manState = 'waiting';
+        manNextSpawnAt = now + 5000 + Math.random() * 15000;
+      }
+    } else if (manState === 'dead') {
+      if (now - manDeathAt >= MAN_DEATH_MS) {
+        manState = 'waiting';
+        manNextSpawnAt = now + 5000 + Math.random() * 15000;
+      }
+    }
+  }
+
+  function renderMan(now) {
+    if (manState === 'waiting') return;
+    let alpha = 1;
+    if (manState === 'dead') {
+      const t = now - manDeathAt;
+      if (t > MAN_DEATH_MS - 700) alpha = Math.max(0, (MAN_DEATH_MS - t) / 700);
+    }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (manState === 'dead') {
+      const dir = manDir >= 0 ? 1 : -1;
+      const bodyLen = MAN_H - 6;
+      ctx.fillStyle = '#cfcfcf';
+      ctx.fillRect(manX, manY + MAN_H - 6, bodyLen * dir, 6);
+      ctx.fillRect(manX + bodyLen * dir, manY + MAN_H - 8, 6 * dir, 6);
+    } else {
+      const legOffset = manWalkPhase ? 2 : -2;
+      ctx.fillStyle = '#eaeaea';
+      ctx.fillRect(manX + 2, manY, 8, 8);
+      ctx.fillRect(manX, manY + 8, 12, 8);
+      ctx.fillRect(manX + 2 + legOffset, manY + 16, 4, 8);
+      ctx.fillRect(manX + 6 - legOffset, manY + 16, 4, 8);
+    }
+    ctx.restore();
+  }
+
   function render(now) {
     ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -224,6 +296,7 @@ canvas#sandCanvas {
         }
       }
     }
+    renderMan(now);
   }
 
   let pointerActive = false, pointerCol = 0, pointerRow = 0;
@@ -260,6 +333,7 @@ canvas#sandCanvas {
     const now = performance.now();
     if (pointerActive) spawnBurst(pointerCol, pointerRow, 16, 4);
     simulateStep(now);
+    updateMan(now);
     render(now);
     requestAnimationFrame(loop);
   }
